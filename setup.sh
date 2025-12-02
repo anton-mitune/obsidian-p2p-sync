@@ -65,7 +65,7 @@ if [ "$SKIP_RUST" = true ]; then
     echo "⚠️  Note: Rust/WASM features are disabled. Install Rust to enable P2P functionality."
 fi
 echo "📖 Next steps:"
-echo "   1. Open demo-vault in Obsidian"
+echo "   1. Open p2p-sync-demo-vault in Obsidian"
 echo "   2. Enable the plugin in Settings → Community Plugins"
 echo "   3. Run 'npm run dev' for development mode"
 echo ""

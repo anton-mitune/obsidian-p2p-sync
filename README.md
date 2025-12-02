@@ -52,7 +52,7 @@ This starts the TypeScript compiler in watch mode and automatically copies chang
 
 ### 4. Test in Obsidian
 
-1. Open the `demo-vault` folder in Obsidian
+1. Open the `p2p-sync-demo-vault` folder in Obsidian
 2. Go to Settings → Community Plugins
 3. Enable "P2P Vault Sync"
 4. Click the sync icon in the ribbon or use Command Palette
@@ -68,7 +68,7 @@ obsidian-p2p-sync/
 │   │   └── lib.rs          # WASM bindings & P2P logic
 │   └── Cargo.toml
 ├── pkg/                     # Generated WASM (gitignored)
-├── demo-vault/              # Test vault
+├── p2p-sync-demo-vault/     # Test vault
 │   ├── .obsidian/
 │   │   └── plugins/
 │   │       └── obsidian-p2p-sync/  # Auto-copied builds

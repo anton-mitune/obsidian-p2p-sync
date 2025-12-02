@@ -7,7 +7,7 @@ import { fileURLToPath } from "url";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-const pluginDir = path.join(__dirname, 'demo-vault', '.obsidian', 'plugins', 'obsidian-p2p-sync');
+const pluginDir = path.join(__dirname, 'p2p-sync-demo-vault', '.obsidian', 'plugins', 'obsidian-p2p-sync');
 
 const banner =
 `/*
