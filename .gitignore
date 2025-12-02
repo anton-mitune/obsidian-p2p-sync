@@ -1,0 +1,38 @@
+# Build output
+main.js
+*.map
+node_modules/
+
+# Rust build
+rust/target/
+rust/Cargo.lock
+
+# WASM output
+pkg/
+
+# Demo vault (except structure)
+demo-vault/.obsidian/workspace.json
+demo-vault/.obsidian/workspace-mobile.json
+demo-vault/.obsidian/plugins/*/
+
+# Keep the plugin folder structure but ignore the built files
+!demo-vault/.obsidian/plugins/.gitkeep
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+*.iml
+*.swp
+*.swo
+
+# Logs
+*.log
+npm-debug.log*
+
+# Testing
+coverage/
+.nyc_output/

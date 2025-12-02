@@ -1,0 +1,32 @@
+{
+	"type": "module",
+	"name": "obsidian-p2p-sync",
+	"version": "0.1.0",
+	"description": "Secure, private P2P vault sync across devices without cloud services",
+	"main": "main.js",
+	"scripts": {
+		"dev": "node esbuild.config.mjs",
+		"build": "tsc -noEmit -skipLibCheck && node esbuild.config.mjs production",
+		"build:wasm": "cd rust && wasm-pack build --target web --out-dir ../pkg",
+		"build:all": "npm run build:wasm && npm run build",
+		"version": "node version-bump.mjs && git add manifest.json versions.json"
+	},
+	"keywords": [
+		"obsidian",
+		"plugin",
+		"p2p",
+		"sync",
+		"peer-to-peer",
+		"local-first"
+	],
+	"author": "Anton Mitune (@anton-mitune)",
+	"license": "MIT",
+	"devDependencies": {
+		"@types/node": "^16.11.6",
+		"builtin-modules": "3.3.0",
+		"esbuild": "0.17.3",
+		"obsidian": "latest",
+		"tslib": "2.4.0",
+		"typescript": "^5.9.3"
+	}
+}
