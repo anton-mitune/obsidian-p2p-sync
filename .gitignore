@@ -11,9 +11,7 @@ rust/Cargo.lock
 pkg/
 
 # Demo vault (except structure)
-demo-vault/.obsidian/workspace.json
-demo-vault/.obsidian/workspace-mobile.json
-demo-vault/.obsidian/plugins/*/
+p2p-sync-demo-vault/
 
 # Keep the plugin folder structure but ignore the built files
 !demo-vault/.obsidian/plugins/.gitkeep
