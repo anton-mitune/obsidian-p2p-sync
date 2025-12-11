@@ -35,6 +35,12 @@ export interface P2PNodeInstance {
   clear_peers(): void;
   get_peer_count(): number;
   status(): string;
+
+  // New methods for UDP discovery
+  process_announcement(json: string, senderIp: string, currentTime: BigInt): boolean;
+  get_announcement_json(): string;
+  prune_peers(currentTime: BigInt, ttlMs: BigInt): number;
+
   free?(): void;
 }
 

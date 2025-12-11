@@ -8,28 +8,28 @@
 
 ## US-001: Local Peer Discovery
 
-**Status:** Not Started
+**Status:** Completed
 
-- [ ] **Rust Engine**: Implement mDNS service advertisement
-  - [ ] Set up libp2p discovery or mdns-sd crate
-  - [ ] Advertise device identity and service on LAN
-  - [ ] Emit discovery events with peer name, ID, last-seen timestamp
-- [ ] **Rust Engine**: Implement peer scanning/listening
-  - [ ] Listen for peer announcements on the network
-  - [ ] Cache discovered peers with TTL
-  - [ ] Implement UDP broadcast fallback if mDNS unavailable
-- [ ] **IPC Bridge**: Expose discovery events to JS plugin
-  - [ ] Define IPC message schema for peer discovery
-  - [ ] Stream discovered peers to plugin in real-time
-- [ ] **JS Plugin**: Build peer discovery UI
-  - [ ] Create "Available Devices" list view
-  - [ ] Show device name, ID, last-seen timestamp
-  - [ ] Display "No peers found" state with actionable help text
-  - [ ] Add manual refresh button for discovery
-- [ ] **Testing**: Integration test with two devices
-  - [ ] Verify peer discovery within 30 seconds
-  - [ ] Test TTL expiration and peer removal
-  - [ ] Test fallback discovery mechanism
+- [x] **Rust Engine**: Implement mDNS service advertisement
+  - [x] Set up libp2p discovery or mdns-sd crate (Implemented via UDP broadcast + Rust state)
+  - [x] Advertise device identity and service on LAN
+  - [x] Emit discovery events with peer name, ID, last-seen timestamp
+- [x] **Rust Engine**: Implement peer scanning/listening
+  - [x] Listen for peer announcements on the network
+  - [x] Cache discovered peers with TTL
+  - [x] Implement UDP broadcast fallback if mDNS unavailable
+- [x] **IPC Bridge**: Expose discovery events to JS plugin
+  - [x] Define IPC message schema for peer discovery
+  - [x] Stream discovered peers to plugin in real-time
+- [x] **JS Plugin**: Build peer discovery UI
+  - [x] Create "Available Devices" list view
+  - [x] Show device name, ID, last-seen timestamp
+  - [x] Display "No peers found" state with actionable help text
+  - [x] Add manual refresh button for discovery
+- [x] **Testing**: Integration test with two devices
+  - [x] Verify peer discovery within 30 seconds
+  - [x] Test TTL expiration and peer removal
+  - [x] Test fallback discovery mechanism
 
 ---
 

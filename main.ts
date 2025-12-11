@@ -1,7 +1,6 @@
 import { Plugin, Notice, PluginSettingTab, App, Setting, FileSystemAdapter } from 'obsidian';
 import { WasmBridge } from './src/wasm-bridge';
 import { P2PDiscoveryService } from './src/discovery-service';
-import { PeerListView, PEER_LIST_VIEW_TYPE } from './src/ui/peer-list-view';
 import { P2PSyncSettings } from './src/types';
 import './src/ui/peer-list-view.css';
 import * as fs from 'fs';
@@ -31,9 +30,8 @@ const DEFAULT_SETTINGS: P2PSyncSettings = {
 
 export default class P2PVaultSyncPlugin extends Plugin {
   private wasmBridge: WasmBridge | null = null;
-  private discoveryService: P2PDiscoveryService | null = null;
+  public discoveryService: P2PDiscoveryService | null = null;
   private settings: P2PSyncSettings = { ...DEFAULT_SETTINGS };
-  private peerListView: PeerListView | null = null;
 
   async onload() {
     console.log('Loading P2P Vault Sync plugin...');
@@ -81,27 +79,6 @@ export default class P2PVaultSyncPlugin extends Plugin {
         new Notice('Failed to initialize P2P Sync engine');
     }
 
-    // Register views
-    this.registerView(PEER_LIST_VIEW_TYPE, (leaf) => {
-      const view = new PeerListView(leaf);
-      if (this.discoveryService) {
-        view.setDiscoveryService(this.discoveryService);
-      }
-      this.peerListView = view;
-      return view;
-    });
-
-    // Add ribbon icon to open peer list view
-    this.addRibbonIcon('network', 'P2P Peers', () => {
-      this.activatePeerListView();
-    });
-
-    // Add ribbon icon for sync
-    this.addRibbonIcon('sync', 'P2P Sync', () => {
-      new Notice('P2P Sync is ready! 🚀');
-      this.startDiscovery();
-    });
-
     // Add commands
     this.addCommand({
       id: 'start-discovery',
@@ -131,22 +108,6 @@ export default class P2PVaultSyncPlugin extends Plugin {
     this.addSettingTab(new P2PSyncSettingTab(this.app, this));
 
     new Notice('P2P Vault Sync loaded successfully! 🎉');
-  }
-
-  async activatePeerListView(): Promise<void> {
-    const { workspace } = this.app;
-
-    let leaf = workspace.getLeavesOfType(PEER_LIST_VIEW_TYPE)[0];
-
-    if (!leaf) {
-      const rightLeaf = workspace.getRightLeaf(false);
-      if (!rightLeaf) {
-        return;
-      }
-      await rightLeaf.setViewState({ type: PEER_LIST_VIEW_TYPE, active: true });
-    } else {
-      workspace.revealLeaf(leaf);
-    }
   }
 
   async startDiscovery(): Promise<void> {
@@ -224,6 +185,7 @@ export default class P2PVaultSyncPlugin extends Plugin {
 // Settings Tab
 class P2PSyncSettingTab extends PluginSettingTab {
   plugin: P2PVaultSyncPlugin;
+  private peerListContainer: HTMLElement | null = null;
 
   constructor(app: App, plugin: P2PVaultSyncPlugin) {
     super(app, plugin);
@@ -237,6 +199,29 @@ class P2PSyncSettingTab extends PluginSettingTab {
     containerEl.empty();
 
     containerEl.createEl('h2', { text: 'P2P Vault Sync Settings' });
+
+    // --- Peer Discovery Section ---
+    containerEl.createEl('h3', { text: 'Available Devices' });
+    const discoveryContainer = containerEl.createDiv('p2p-discovery-section');
+    this.peerListContainer = discoveryContainer.createDiv('p2p-peer-list');
+
+    // Start discovery when settings are opened
+    if (this.plugin.discoveryService) {
+        this.plugin.startDiscovery().catch(err => console.error(err));
+
+        // Subscribe to events to update the list
+        // We need to bind the render function to this instance
+        this.plugin.discoveryService.on('peer_discovered', this.onPeerUpdate);
+        this.plugin.discoveryService.on('peer_updated', this.onPeerUpdate);
+        this.plugin.discoveryService.on('peer_lost', this.onPeerUpdate);
+    } else {
+        this.peerListContainer.createEl('div', { text: 'Discovery service not initialized', cls: 'p2p-error' });
+    }
+
+    this.renderPeerList();
+
+    containerEl.createEl('hr');
+    containerEl.createEl('h3', { text: 'Configuration' });
 
     // Device Name
     new Setting(containerEl)
@@ -339,6 +324,50 @@ class P2PSyncSettingTab extends PluginSettingTab {
     aboutEl.createEl('div', {
       text: 'P2P Vault Sync - Secure peer-to-peer synchronization for Obsidian vaults',
       cls: 'setting-item-description',
+    });
+  }
+
+  hide(): void {
+    if (this.plugin.discoveryService) {
+        this.plugin.discoveryService.removeListener('peer_discovered', this.onPeerUpdate);
+        this.plugin.discoveryService.removeListener('peer_updated', this.onPeerUpdate);
+        this.plugin.discoveryService.removeListener('peer_lost', this.onPeerUpdate);
+
+        // Stop discovery when leaving settings to save resources
+        this.plugin.stopDiscovery();
+    }
+  }
+
+  private onPeerUpdate = () => {
+    this.renderPeerList();
+  }
+
+  private renderPeerList(): void {
+    if (!this.peerListContainer || !this.plugin.discoveryService) return;
+
+    this.peerListContainer.empty();
+    const peers = this.plugin.discoveryService.getPeers();
+
+    if (peers.length === 0) {
+        const emptyState = this.peerListContainer.createDiv('p2p-empty-state');
+        emptyState.createEl('div', { text: 'No peers found yet.', cls: 'p2p-empty-message' });
+        emptyState.createEl('div', { text: 'Make sure other devices are on the same Wi-Fi and have this plugin open.', cls: 'p2p-empty-help' });
+        return;
+    }
+
+    const list = this.peerListContainer.createEl('div', { cls: 'p2p-peers-list' });
+
+    peers.forEach(peer => {
+        const item = list.createDiv('p2p-peer-item');
+
+        const nameSection = item.createDiv('p2p-peer-name-section');
+        nameSection.createSpan({ cls: 'p2p-peer-icon', text: '🖥️' });
+        nameSection.createSpan({ text: peer.name, cls: 'p2p-peer-name' });
+
+        item.createDiv({ cls: 'p2p-peer-id', text: `ID: ${peer.id.substring(0, 8)}...` });
+
+        const lastSeen = new Date(peer.last_seen_timestamp).toLocaleTimeString();
+        item.createDiv({ cls: 'p2p-peer-lastseen', text: `Last seen: ${lastSeen}` });
     });
   }
 }

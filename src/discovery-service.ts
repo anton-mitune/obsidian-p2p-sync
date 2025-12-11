@@ -5,6 +5,7 @@
 
 import { DiscoveredPeerData, P2PNodeInstance } from './types';
 import { EventEmitter } from 'events';
+import { UdpTransport } from './transport/udp-transport';
 
 export interface DiscoveryServiceConfig {
   deviceName: string;
@@ -20,12 +21,16 @@ export class P2PDiscoveryService extends EventEmitter {
   private peerTTL: number;
   private ttlTimers: Map<string, NodeJS.Timeout> = new Map();
   private deviceName: string;
+  private transport: UdpTransport;
+  private broadcastInterval: NodeJS.Timeout | null = null;
+  private pruneInterval: NodeJS.Timeout | null = null;
 
   constructor(config: DiscoveryServiceConfig) {
     super();
     this.deviceName = config.deviceName;
     this.discoveryTimeout = config.timeoutMs || 30000; // 30 seconds default
     this.peerTTL = config.ttlMs || 60000; // 60 seconds default
+    this.transport = new UdpTransport();
   }
 
   /**
@@ -34,6 +39,16 @@ export class P2PDiscoveryService extends EventEmitter {
   initialize(node: P2PNodeInstance): void {
     this.node = node;
     console.log(`P2P Discovery Service initialized for ${this.deviceName}`);
+
+    // Setup transport listeners
+    this.transport.on('message', (msg: string, senderIp: string) => {
+      this.handleDiscoveryMessage(msg, senderIp);
+    });
+
+    this.transport.on('error', (err) => {
+      console.error('Discovery transport error:', err);
+      this.emit('error', err);
+    });
   }
 
   /**
@@ -53,11 +68,21 @@ export class P2PDiscoveryService extends EventEmitter {
 
     try {
       this.node.start_discovery();
+      this.transport.start();
       console.log('Peer discovery started');
       this.emit('discovery_started');
 
-      // Simulate discovery timeout (in real implementation, this would be handled by mDNS)
-      await this.performDiscoveryRound();
+      // Start broadcasting announcements
+      this.broadcastAnnouncement();
+      this.broadcastInterval = setInterval(() => {
+        this.broadcastAnnouncement();
+      }, 2000); // Broadcast every 2 seconds
+
+      // Start pruning expired peers
+      this.pruneInterval = setInterval(() => {
+        this.prunePeers();
+      }, 5000); // Check every 5 seconds
+
     } catch (error) {
       console.error('Failed to start discovery:', error);
       this.isDiscovering = false;
@@ -82,10 +107,73 @@ export class P2PDiscoveryService extends EventEmitter {
       }
     }
 
+    this.transport.stop();
+    if (this.broadcastInterval) {
+      clearInterval(this.broadcastInterval);
+      this.broadcastInterval = null;
+    }
+    if (this.pruneInterval) {
+      clearInterval(this.pruneInterval);
+      this.pruneInterval = null;
+    }
+
     this.isDiscovering = false;
     this.clearAllTTLTimers();
     console.log('Peer discovery stopped');
     this.emit('discovery_stopped');
+  }
+
+  private broadcastAnnouncement(): void {
+    if (!this.node) return;
+    const announcement = this.node.get_announcement_json();
+    this.transport.broadcast(announcement);
+  }
+
+  private handleDiscoveryMessage(msg: string, senderIp: string): void {
+    if (!this.node) return;
+    try {
+      // Pass to Rust to process
+      // Rust expects u64 for timestamp, we pass BigInt(Date.now())
+      const isNewOrUpdated = this.node.process_announcement(msg, senderIp, BigInt(Date.now()));
+
+      if (isNewOrUpdated) {
+        // If Rust says it's relevant, we can fetch the updated peer list or just parse the msg ourselves for the event
+        // For simplicity, let's parse the msg to emit the event
+        const data = JSON.parse(msg);
+        const peer: DiscoveredPeerData = {
+            id: data.peer_id,
+            name: data.device_name,
+            device_id: data.device_id,
+            last_seen_timestamp: Date.now(),
+            addresses: [senderIp]
+        };
+
+        if (!this.peers.has(peer.id)) {
+            console.log('New peer discovered:', peer.name);
+            this.emit('peer_discovered', peer);
+        } else {
+            this.emit('peer_updated', peer);
+        }
+        this.peers.set(peer.id, peer);
+        this.resetPeerTTL(peer.id);
+      }
+    } catch (e) {
+      console.error('Error processing discovery message:', e);
+    }
+  }
+
+  private prunePeers(): void {
+    if (!this.node) return;
+    try {
+        const removedCount = this.node.prune_peers(BigInt(Date.now()), BigInt(this.peerTTL));
+        if (removedCount > 0) {
+            console.log(`Pruned ${removedCount} expired peers`);
+            // Sync our local map with Rust's state if needed, or just rely on Rust
+            // For now, we rely on the TTL timers in JS for events, but Rust is the source of truth
+        }
+    } catch (e) {
+        console.error('Error pruning peers:', e);
+    }
   }
 
   /**
@@ -215,21 +303,6 @@ export class P2PDiscoveryService extends EventEmitter {
       peerCount: this.peers.size,
       peers: Array.from(this.peers.values()),
     };
-  }
-
-  /**
-   * Perform a discovery round (simulated for WASM)
-   */
-  private async performDiscoveryRound(): Promise<void> {
-    return new Promise((resolve) => {
-      // In a real implementation, this would perform actual mDNS discovery
-      // For now, we'll just wait and resolve
-      setTimeout(() => {
-        console.log(`Discovery round complete. Found ${this.peers.size} peers`);
-        this.emit('discovery_complete', { peerCount: this.peers.size });
-        resolve();
-      }, this.discoveryTimeout);
-    });
   }
 
   /**

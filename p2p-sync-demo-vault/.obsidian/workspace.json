@@ -121,13 +121,23 @@
               "icon": "lucide-archive",
               "title": "All properties"
             }
+          },
+          {
+            "id": "27d28cf9a7401137",
+            "type": "leaf",
+            "state": {
+              "type": "p2p-peer-list",
+              "state": {},
+              "icon": "network",
+              "title": "P2P Peers"
+            }
           }
-        ]
+        ],
+        "currentTab": 2
       }
     ],
     "direction": "horizontal",
-    "width": 300,
-    "collapsed": true
+    "width": 552.5
   },
   "left-ribbon": {
     "hiddenItems": {
@@ -141,7 +151,7 @@
       "obsidian-p2p-sync:P2P Sync": false
     }
   },
-  "active": "editor",
+  "active": "27d28cf9a7401137",
   "lastOpenFiles": [
     "Device A Notes.md",
     "Device B Notes.md",

@@ -34,13 +34,23 @@ pub fn get_version() -> String {
 // P2P Discovery Structures
 // ============================================================================
 
+#[derive(Serialize, Deserialize)]
+struct PeerAnnouncement {
+    peer_id: String,
+    device_name: String,
+    device_id: String,
+    // We can add more fields later (e.g., public key, addresses)
+}
+
 /// Discovered peer information
 #[wasm_bindgen]
+#[derive(Serialize, Deserialize, Clone)]
 pub struct DiscoveredPeer {
     id: String,
     name: String,
     device_id: String,
     last_seen_timestamp: u64,
+    address: String, // IP address
 }
 
 #[wasm_bindgen]
@@ -51,12 +61,14 @@ impl DiscoveredPeer {
         name: String,
         device_id: String,
         last_seen_timestamp: u64,
+        address: String,
     ) -> DiscoveredPeer {
         DiscoveredPeer {
             id,
             name,
             device_id,
             last_seen_timestamp,
+            address,
         }
     }
 
@@ -75,6 +87,10 @@ impl DiscoveredPeer {
     pub fn get_last_seen_timestamp(&self) -> u64 {
         self.last_seen_timestamp
     }
+
+    pub fn get_address(&self) -> String {
+        self.address.clone()
+    }
 }
 
 // ============================================================================
@@ -87,7 +103,7 @@ pub struct P2PNode {
     peer_id: String,
     device_name: String,
     device_id: String,
-    peer_count: usize,
+    peers: HashMap<String, DiscoveredPeer>,
     is_discovering: bool,
 }
 
@@ -103,7 +119,7 @@ impl P2PNode {
             peer_id: peer_id.clone(),
             device_name,
             device_id,
-            peer_count: 0,
+            peers: HashMap::new(),
             is_discovering: false,
         }
     }
@@ -139,41 +155,82 @@ impl P2PNode {
         Ok(())
     }
 
-    /// Add a discovered peer
-    pub fn add_discovered_peer(&mut self, _peer: &DiscoveredPeer) -> Result<(), JsValue> {
-        self.peer_count += 1;
+    /// Add a discovered peer (manual/legacy)
+    pub fn add_discovered_peer(&mut self, peer: &DiscoveredPeer) -> Result<(), JsValue> {
+        self.peers.insert(peer.id.clone(), peer.clone());
         Ok(())
+    }
+
+    /// Process an incoming discovery announcement
+    /// Returns true if this is a new peer or an update to an existing one
+    pub fn process_announcement(&mut self, json: &str, sender_ip: &str, current_time: u64) -> Result<bool, JsValue> {
+        let announcement: PeerAnnouncement = serde_json::from_str(json)
+            .map_err(|e| JsValue::from_str(&format!("Failed to parse announcement: {}", e)))?;
+
+        // Ignore own announcements
+        if announcement.peer_id == self.peer_id {
+            return Ok(false);
+        }
+
+        let peer = DiscoveredPeer {
+            id: announcement.peer_id.clone(),
+            name: announcement.device_name,
+            device_id: announcement.device_id,
+            last_seen_timestamp: current_time,
+            address: sender_ip.to_string(),
+        };
+
+        self.peers.insert(announcement.peer_id, peer);
+        Ok(true)
+    }
+
+    /// Generate an announcement message for this node
+    pub fn get_announcement_json(&self) -> String {
+        let announcement = PeerAnnouncement {
+            peer_id: self.peer_id.clone(),
+            device_name: self.device_name.clone(),
+            device_id: self.device_id.clone(),
+        };
+        serde_json::to_string(&announcement).unwrap_or_default()
+    }
+
+    /// Prune peers that haven't been seen for `ttl_ms`
+    pub fn prune_peers(&mut self, current_time: u64, ttl_ms: u64) -> Result<usize, JsValue> {
+        let initial_count = self.peers.len();
+        self.peers.retain(|_, peer| {
+            current_time - peer.last_seen_timestamp < ttl_ms
+        });
+        Ok(initial_count - self.peers.len())
     }
 
     /// Get list of discovered peers as JSON
     pub fn get_discovered_peers_json(&self) -> String {
-        "[]".to_string() // Placeholder - would return actual peer list
+        let peers_vec: Vec<&DiscoveredPeer> = self.peers.values().collect();
+        serde_json::to_string(&peers_vec).unwrap_or_default()
     }
 
     /// Remove a discovered peer by ID
-    pub fn remove_peer(&mut self, _peer_id: &str) -> Result<(), JsValue> {
-        if self.peer_count > 0 {
-            self.peer_count -= 1;
-        }
+    pub fn remove_peer(&mut self, peer_id: &str) -> Result<(), JsValue> {
+        self.peers.remove(peer_id);
         Ok(())
     }
 
     /// Clear all discovered peers
     pub fn clear_peers(&mut self) -> Result<(), JsValue> {
-        self.peer_count = 0;
+        self.peers.clear();
         Ok(())
     }
 
     /// Get the number of discovered peers
     pub fn get_peer_count(&self) -> usize {
-        self.peer_count
+        self.peers.len()
     }
 
     /// Node status
     pub fn status(&self) -> String {
         format!(
             "P2P Node [{}] on {}: {} peers discovered, discovering={}",
-            self.device_name, self.device_id, self.peer_count, self.is_discovering
+            self.device_name, self.device_id, self.peers.len(), self.is_discovering
         )
     }
 }
