@@ -1,7 +1,6 @@
 use wasm_bindgen::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex};
 use uuid::Uuid;
 
 // Module declarations
@@ -111,9 +110,9 @@ pub struct P2PNode {
 impl P2PNode {
     /// Create a new P2P node with device configuration
     #[wasm_bindgen(constructor)]
-    pub fn new(device_name: String) -> P2PNode {
+    pub fn new(device_name: String, device_id: String) -> P2PNode {
         let peer_id = Uuid::new_v4().to_string();
-        let device_id = Uuid::new_v4().to_string();
+        // Use provided device_id
 
         P2PNode {
             peer_id: peer_id.clone(),

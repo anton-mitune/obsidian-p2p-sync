@@ -8,19 +8,48 @@
 
 export interface WasmModule {
   // Discovery
-  P2PNode: new (deviceName: string) => P2PNodeInstance;
+  P2PNode: new (deviceName: string, deviceId: string) => P2PNodeInstance;
 
   // Utilities
   greet_from_rust(name: string): string;
   get_version(): string;
 
   // Crypto
+  DeviceIdentity: DeviceIdentityConstructor;
+  KeyExchange: new () => KeyExchangeInstance;
+  PairingCode: new () => PairingCodeInstance;
+
   generate_pairing_code(): string;
-  generate_fingerprint(deviceId: string): string;
-  verify_pairing_code(code: string): boolean;
+  generate_fingerprint(publicKeyB64: string): string;
+  verify_pairing_code_format(code: string): boolean;
+  verify_signature(publicKeyB64: string, message: Uint8Array, signatureB64: string): boolean;
 
   // Allow additional properties
   [key: string]: unknown;
+}
+
+export interface DeviceIdentityConstructor {
+  new (deviceId: string): DeviceIdentityInstance;
+  from_secret_key(deviceId: string, secretKeyB64: string): DeviceIdentityInstance;
+}
+
+export interface DeviceIdentityInstance {
+  get_device_id(): string;
+  get_public_key(): string;
+  get_secret_key(): string;
+  sign(message: Uint8Array): string;
+  free?(): void;
+}
+
+export interface KeyExchangeInstance {
+  get_public_key(): string;
+  compute_shared_secret(otherPublicKeyB64: string): string;
+  free?(): void;
+}
+
+export interface PairingCodeInstance {
+  get_code(): string;
+  free?(): void;
 }
 
 export interface P2PNodeInstance {
@@ -66,6 +95,9 @@ export interface DiscoveredPeerData {
 
 export interface P2PSyncSettings {
   deviceName: string;
+  deviceId: string; // Unique ID for this device
+  deviceSecretKey?: string; // Base64 encoded secret key
+  pairedDevices: string[]; // List of paired device IDs
   enableLanDiscovery: boolean;
   discoveryTimeoutSeconds: number;
   enableEncryption: boolean;
@@ -98,8 +130,40 @@ export interface SyncEvent extends IPCMessage {
   payload: {
     peerId: string;
     fileCount?: number;
-    transferredBytes?: number;
-    totalBytes?: number;
-    error?: string;
   };
 }
+
+// ============================================================================
+// Protocol Messages
+// ============================================================================
+
+export type ProtocolMessage = DiscoveryMessage | PairingRequestMessage | PairingResponseMessage;
+
+export interface DiscoveryMessage {
+  type: 'discovery';
+  payload: any; // The existing discovery JSON
+}
+
+export interface PairingRequestMessage {
+  type: 'pairing_request';
+  payload: {
+    requestId: string;
+    initiatorDeviceId: string;
+    initiatorName: string;
+    initiatorPublicKey: string;
+    pairingCode: string; // The code entered by the user
+  };
+}
+
+export interface PairingResponseMessage {
+  type: 'pairing_response';
+  payload: {
+    requestId: string;
+    responderDeviceId: string;
+    responderName: string;
+    responderPublicKey: string;
+    signature: string; // Signature of the request ID + initiator public key
+    status: 'accepted' | 'rejected';
+  };
+}
+

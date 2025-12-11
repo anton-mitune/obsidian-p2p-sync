@@ -1,6 +1,8 @@
 import { Plugin, Notice, PluginSettingTab, App, Setting, FileSystemAdapter } from 'obsidian';
 import { WasmBridge } from './src/wasm-bridge';
 import { P2PDiscoveryService } from './src/discovery-service';
+import { SecurityService } from './src/security-service';
+import { PairingModal } from './src/ui/pairing-modal';
 import { P2PSyncSettings } from './src/types';
 import './src/ui/peer-list-view.css';
 import * as fs from 'fs';
@@ -20,6 +22,8 @@ import * as path from 'path';
 // Default settings
 const DEFAULT_SETTINGS: P2PSyncSettings = {
   deviceName: 'My Device',
+  deviceId: '', // Will be generated on first load
+  pairedDevices: [],
   enableLanDiscovery: true,
   discoveryTimeoutSeconds: 30,
   enableEncryption: true,
@@ -31,7 +35,9 @@ const DEFAULT_SETTINGS: P2PSyncSettings = {
 export default class P2PVaultSyncPlugin extends Plugin {
   private wasmBridge: WasmBridge | null = null;
   public discoveryService: P2PDiscoveryService | null = null;
+  public securityService: SecurityService | null = null;
   private settings: P2PSyncSettings = { ...DEFAULT_SETTINGS };
+  public settingTab: P2PSyncSettingTab | null = null;
 
   async onload() {
     console.log('Loading P2P Vault Sync plugin...');
@@ -59,8 +65,39 @@ export default class P2PVaultSyncPlugin extends Plugin {
         if (wasmInitialized) {
             console.log('WASM module initialized');
 
+            let settingsChanged = false;
+
+            // Ensure device ID exists
+            if (!this.settings.deviceId) {
+                // Generate a random UUID-like string
+                this.settings.deviceId = 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+                    var r = Math.random() * 16 | 0, v = c == 'x' ? r : (r & 0x3 | 0x8);
+                    return v.toString(16);
+                });
+                settingsChanged = true;
+            }
+
+            // Ensure device Name exists (if empty)
+            if (!this.settings.deviceName) {
+                this.settings.deviceName = this.generateDeviceName();
+                settingsChanged = true;
+            }
+
+            if (settingsChanged) {
+                await this.saveSettings();
+            }
+
+            // Initialize Security Service
+            this.securityService = new SecurityService(this.wasmBridge, this.settings.deviceId);
+            const secretKey = await this.securityService.initialize(this.settings.deviceSecretKey);
+
+            if (secretKey !== this.settings.deviceSecretKey) {
+                this.settings.deviceSecretKey = secretKey;
+                await this.saveSettings();
+            }
+
             // Create P2P node
-            const p2pNode = this.wasmBridge.createOrGetNode(this.settings.deviceName);
+            const p2pNode = this.wasmBridge.createOrGetNode(this.settings.deviceName, this.settings.deviceId);
             if (p2pNode) {
                 // Initialize discovery service
                 this.discoveryService = new P2PDiscoveryService({
@@ -69,6 +106,44 @@ export default class P2PVaultSyncPlugin extends Plugin {
                 });
 
                 this.discoveryService.initialize(p2pNode);
+
+                // Share transport with Security Service
+                // We need to access the transport from discovery service or create a shared one
+                // Currently DiscoveryService creates its own UdpTransport.
+                // Let's expose it or pass it in.
+                // For now, let's assume we can get it from DiscoveryService (I'll add a getter)
+                // Or better, let's make DiscoveryService expose the transport.
+                // Wait, I can't easily change DiscoveryService constructor without breaking things.
+                // I'll add a getter to DiscoveryService.
+
+                // Actually, let's just use the one from DiscoveryService if possible.
+                // I need to modify DiscoveryService to expose transport.
+
+                // Temporary hack: cast to any to access private transport (for MVP speed)
+                // Ideally refactor to dependency injection.
+                const transport = (this.discoveryService as any).transport;
+                if (transport && this.securityService) {
+                    this.securityService.setTransport(transport);
+
+                    // Listen for pairing success
+                    this.securityService.on('pairing_success', async (data: { deviceId: string, name: string }) => {
+                        new Notice(`Successfully paired with ${data.name}!`);
+                        const paired = this.settings.pairedDevices || [];
+                        if (!paired.includes(data.deviceId)) {
+                            this.settings.pairedDevices = [...paired, data.deviceId];
+                            await this.saveSettings();
+
+                            // Refresh UI if open
+                            // We can emit an event or call a method on the setting tab if we had reference
+                            // For now, let's just force a re-render if the tab is open
+                            // This is a bit hacky but works for MVP
+                            const settingTab = (this as any).settingTab;
+                            if (settingTab && settingTab.renderPeerList) {
+                                settingTab.renderPeerList();
+                            }
+                        }
+                    });
+                }
 
                 console.log('Discovery service initialized');
                 console.log('P2P Node status:', p2pNode.status());
@@ -80,6 +155,18 @@ export default class P2PVaultSyncPlugin extends Plugin {
     }
 
     // Add commands
+    this.addCommand({
+      id: 'pair-device',
+      name: 'Pair with Device',
+      callback: () => {
+        if (this.securityService) {
+            new PairingModal(this.app, this.securityService, this.settings.deviceName).open();
+        } else {
+            new Notice('P2P Engine not initialized');
+        }
+      },
+    });
+
     this.addCommand({
       id: 'start-discovery',
       name: 'Start Peer Discovery',
@@ -105,7 +192,8 @@ export default class P2PVaultSyncPlugin extends Plugin {
     });
 
     // Add settings tab
-    this.addSettingTab(new P2PSyncSettingTab(this.app, this));
+    this.settingTab = new P2PSyncSettingTab(this.app, this);
+    this.addSettingTab(this.settingTab);
 
     new Notice('P2P Vault Sync loaded successfully! 🎉');
   }
@@ -151,11 +239,20 @@ export default class P2PVaultSyncPlugin extends Plugin {
 
   async loadSettings() {
     const data = await this.loadData();
-    this.settings = Object.assign({}, DEFAULT_SETTINGS, data?.settings || {});
+    this.settings = Object.assign({}, DEFAULT_SETTINGS, data || {});
   }
 
   async saveSettings() {
-    await this.saveData({ settings: this.settings });
+    await this.saveData(this.settings);
+  }
+
+  generateDeviceName(): string {
+    const adjectives = ['Red', 'Blue', 'Green', 'Fast', 'Quiet', 'Happy', 'Brave', 'Calm', 'Bright', 'Swift'];
+    const nouns = ['Fox', 'Eagle', 'Bear', 'Wolf', 'Tiger', 'Lion', 'Hawk', 'Owl', 'Falcon', 'Badger'];
+    const adj = adjectives[Math.floor(Math.random() * adjectives.length)];
+    const noun = nouns[Math.floor(Math.random() * nouns.length)];
+    const num = Math.floor(Math.random() * 100);
+    return `${adj} ${noun} ${num}`;
   }
 
   getSettings(): P2PSyncSettings {
@@ -199,6 +296,38 @@ class P2PSyncSettingTab extends PluginSettingTab {
     containerEl.empty();
 
     containerEl.createEl('h2', { text: 'P2P Vault Sync Settings' });
+
+    // --- My Device Info ---
+    const infoContainer = containerEl.createDiv('p2p-my-device-info');
+    infoContainer.style.marginBottom = '20px';
+    infoContainer.style.padding = '15px';
+    infoContainer.style.background = 'var(--background-secondary)';
+    infoContainer.style.borderRadius = '8px';
+
+    const myDeviceHeader = infoContainer.createEl('h3', { text: 'My Device' });
+    myDeviceHeader.style.marginTop = '0';
+
+    const infoGrid = infoContainer.createDiv();
+    infoGrid.style.display = 'grid';
+    infoGrid.style.gridTemplateColumns = 'auto 1fr';
+    infoGrid.style.gap = '10px';
+    infoGrid.style.alignItems = 'center';
+
+    const nameLabel = infoGrid.createEl('div', { text: 'Name:' });
+    nameLabel.style.fontWeight = 'bold';
+    nameLabel.style.color = 'var(--text-muted)';
+
+    const nameValue = infoGrid.createEl('div', { text: settings.deviceName });
+    nameValue.style.fontWeight = '600';
+
+    const idLabel = infoGrid.createEl('div', { text: 'ID:' });
+    idLabel.style.fontWeight = 'bold';
+    idLabel.style.color = 'var(--text-muted)';
+
+    const idContainer = infoGrid.createDiv();
+    const idValue = idContainer.createSpan({ text: settings.deviceId });
+    idValue.style.fontFamily = 'var(--font-monospace)';
+    idValue.style.marginRight = '10px';
 
     // --- Peer Discovery Section ---
     containerEl.createEl('h3', { text: 'Available Devices' });
@@ -342,7 +471,7 @@ class P2PSyncSettingTab extends PluginSettingTab {
     this.renderPeerList();
   }
 
-  private renderPeerList(): void {
+  public renderPeerList(): void {
     if (!this.peerListContainer || !this.plugin.discoveryService) return;
 
     this.peerListContainer.empty();
@@ -356,18 +485,41 @@ class P2PSyncSettingTab extends PluginSettingTab {
     }
 
     const list = this.peerListContainer.createEl('div', { cls: 'p2p-peers-list' });
+    const pairedDevices = this.plugin.getSettings().pairedDevices || [];
 
     peers.forEach(peer => {
         const item = list.createDiv('p2p-peer-item');
 
-        const nameSection = item.createDiv('p2p-peer-name-section');
+        const infoSection = item.createDiv('p2p-peer-info');
+        const nameSection = infoSection.createDiv('p2p-peer-name-section');
         nameSection.createSpan({ cls: 'p2p-peer-icon', text: '🖥️' });
         nameSection.createSpan({ text: peer.name, cls: 'p2p-peer-name' });
 
-        item.createDiv({ cls: 'p2p-peer-id', text: `ID: ${peer.id.substring(0, 8)}...` });
+        infoSection.createDiv({ cls: 'p2p-peer-id', text: `ID: ${peer.device_id.substring(0, 8)}...` });
 
         const lastSeen = new Date(peer.last_seen_timestamp).toLocaleTimeString();
-        item.createDiv({ cls: 'p2p-peer-lastseen', text: `Last seen: ${lastSeen}` });
+        infoSection.createDiv({ cls: 'p2p-peer-lastseen', text: `Last seen: ${lastSeen}` });
+
+        // Action Section
+        const actionSection = item.createDiv('p2p-peer-actions');
+        const isPaired = this.plugin.securityService?.isPaired(peer.device_id, pairedDevices);
+
+        const pairBtn = actionSection.createEl('button', {
+            text: isPaired ? 'Paired' : 'Pair',
+            cls: isPaired ? 'mod-success' : 'mod-cta'
+        }) as HTMLButtonElement;
+
+        if (isPaired) {
+            pairBtn.disabled = true;
+            pairBtn.title = "This device is already paired";
+        } else {
+            pairBtn.onclick = () => {
+                if (this.plugin.securityService) {
+                    // Pass the target peer to the modal
+                    new PairingModal(this.app, this.plugin.securityService, this.plugin.getSettings().deviceName, peer).open();
+                }
+            };
+        }
     });
   }
 }

@@ -49,6 +49,14 @@ export class UdpTransport extends EventEmitter {
         });
     }
 
+    send(message: string, ip: string, port: number = 19840): void {
+        if (!this.socket) return;
+        const buffer = Buffer.from(message);
+        this.socket.send(buffer, 0, buffer.length, port, ip, (err) => {
+            if (err) console.error(`Send error to ${ip}:`, err);
+        });
+    }
+
     stop(): void {
         if (this.socket) {
             this.socket.close();

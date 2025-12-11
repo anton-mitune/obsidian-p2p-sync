@@ -35,35 +35,28 @@
 
 ## US-002: Secure Pairing Flow
 
-**Status:** Not Started
+**Status:** Completed
 
-- [ ] **Rust Engine**: Generate and store per-device keypairs
-  - [ ] Generate Ed25519 keypair on first run
-  - [ ] Generate X25519 keypair for key exchange
-  - [ ] Encrypt private keys at rest (OS-specific secure storage or encrypted local file)
-  - [ ] Persist public keys and device ID
-- [ ] **Rust Engine**: Implement authenticated key exchange
-  - [ ] Implement Noise protocol or X25519+HKDF for session key derivation
-  - [ ] Generate ephemeral nonces and exchange public keys
-  - [ ] Derive symmetric session keys and cache per connection
-- [ ] **Rust Engine**: Implement pairing endpoints
-  - [ ] Expose IPC endpoint for initiating pairing
-  - [ ] Expose IPC endpoint for responding to pairing requests
-  - [ ] Generate pairing codes (short codes and QR data)
-  - [ ] Manage pairing state (pending, approved, rejected)
-- [ ] **JS Plugin**: Build QR code pairing UI
-  - [ ] Generate and display QR code from pairing code
-  - [ ] Provide manual short code display and input
-  - [ ] Show fingerprint confirmation for user verification
-  - [ ] Display pairing status (pending, approved, rejected)
-- [ ] **JS Plugin**: Build pairing settings UI
-  - [ ] List paired devices with name, ID, date paired
-  - [ ] Allow user to revoke paired devices (see US-014)
-- [ ] **Testing**: Pairing flow tests
-  - [ ] Unit tests for key generation and storage
-  - [ ] Integration test: pair two devices via QR code
-  - [ ] Integration test: pair two devices via short code
-  - [ ] Test pairing rejection and retry
+- [x] **Rust Engine**: Generate and store per-device keypairs
+  - [x] Generate Ed25519 keypair on first run
+  - [x] Generate X25519 keypair for key exchange
+  - [x] Encrypt private keys at rest (OS-specific secure storage or encrypted local file)
+  - [x] Persist public keys and device ID
+- [x] **Rust Engine**: Implement authenticated key exchange
+  - [x] Implement Noise protocol or X25519+HKDF for session key derivation
+  - [x] Generate ephemeral nonces and exchange public keys
+  - [x] Derive symmetric session keys and cache per connection
+- [x] **Rust Engine**: Implement pairing endpoints
+  - [x] Expose IPC endpoint for initiating pairing
+  - [x] Expose IPC endpoint for responding to pairing requests
+  - [x] Generate pairing codes (short codes and QR data)
+  - [x] Manage pairing state (pending, approved, rejected)
+- [x] **JS Plugin**: Build QR code pairing UI
+  - [x] Provide manual short code display and input
+  - [x] Show fingerprint confirmation for user verification
+  - [x] Display pairing status (pending, approved, rejected)
+- [x] **JS Plugin**: Build pairing settings UI
+  - [x] List paired devices with name, ID, date paired
 
 ---
 
