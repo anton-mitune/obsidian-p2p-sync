@@ -15,9 +15,12 @@ serde_json = "1.0"
 console_error_panic_hook = "0.1"
 wee_alloc = { version = "0.4", optional = true }
 
-# Future P2P dependencies (commented for now, will be used in Phase 1)
-# libp2p = { version = "0.53", features = ["tcp", "noise", "yamux", "gossipsub", "mdns"] }
-# tokio = { version = "1", features = ["sync", "rt"] }
+# For WASM compatibility, use web-compatible features only
+uuid = { version = "1.0", features = ["v4", "serde", "js"] }
+
+# Note: libp2p, tokio, ring, x25519-dalek, sha2, rand, notify, tracing
+# will be used in native binary implementation
+# For WASM, we implement simplified versions in Rust
 
 [dev-dependencies]
 wasm-bindgen-test = "0.3"

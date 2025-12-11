@@ -5,5 +5,6 @@
 	"minAppVersion": "0.15.0",
 	"description": "Secure, private P2P vault sync across devices without cloud services",
 	"author": "Anton Mitune (@anton-mitune)",
-	"isDesktopOnly": false
+	"isDesktopOnly": false,
+	"cssStylesheets": ["styles.css"]
 }

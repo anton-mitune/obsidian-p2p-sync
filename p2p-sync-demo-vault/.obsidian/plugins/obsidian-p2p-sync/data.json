@@ -1,0 +1,11 @@
+{
+  "settings": {
+    "deviceName": "Macbok",
+    "enableLanDiscovery": true,
+    "discoveryTimeoutSeconds": 30,
+    "enableEncryption": true,
+    "autoSync": true,
+    "syncIntervalSeconds": 60,
+    "logLevel": "info"
+  }
+}

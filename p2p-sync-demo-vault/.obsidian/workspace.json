@@ -131,6 +131,7 @@
   },
   "left-ribbon": {
     "hiddenItems": {
+      "obsidian-p2p-sync:P2P Peers": false,
       "switcher:Open quick switcher": false,
       "graph:Open graph view": false,
       "canvas:Create new canvas": false,

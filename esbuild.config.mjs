@@ -40,13 +40,20 @@ const buildOptions = {
 		"@lezer/lr",
 		...builtins],
 	format: "cjs",
-	target: "es2018",
+	target: "es2020",
 	logLevel: "info",
 	sourcemap: prod ? false : "inline",
 	treeShaking: true,
 	outfile: "main.js",
 	minify: prod,
 };
+
+// Copy WASM file to the build directory
+fs.copyFileSync(
+	path.join(__dirname, 'pkg', 'obsidian_p2p_sync_bg.wasm'),
+	path.join(pluginDir, 'obsidian_p2p_sync_bg.wasm')
+);
+console.log('Copied obsidian_p2p_sync_bg.wasm to plugin directory');
 
 // Create an esbuild context so we can use watch/rebuild in a version-compatible way
 const context = await esbuild.context(buildOptions);
@@ -60,8 +67,8 @@ if (prod) {
 		}
 		fs.copyFileSync('main.js', path.join(pluginDir, 'main.js'));
 		fs.copyFileSync('manifest.json', path.join(pluginDir, 'manifest.json'));
-		if (fs.existsSync('styles.css')) {
-			fs.copyFileSync('styles.css', path.join(pluginDir, 'styles.css'));
+		if (fs.existsSync('main.css')) {
+			fs.copyFileSync('main.css', path.join(pluginDir, 'styles.css'));
 		}
 		// Copy WASM files if they exist
 		if (fs.existsSync('pkg')) {
@@ -94,6 +101,9 @@ if (prod) {
 			try {
 				if (fs.existsSync(pluginDir)) {
 					fs.copyFileSync('main.js', path.join(pluginDir, 'main.js'));
+					if (fs.existsSync('main.css')) {
+						fs.copyFileSync('main.css', path.join(pluginDir, 'styles.css'));
+					}
 					if (fs.existsSync('pkg')) {
 						const pkgDir = path.join(pluginDir, 'pkg');
 						if (!fs.existsSync(pkgDir)) {
