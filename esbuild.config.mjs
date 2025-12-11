@@ -18,7 +18,7 @@ if you want to view the source, please visit the github repository of this plugi
 
 const prod = (process.argv[2] === "production");
 
-const context = await esbuild.context({
+const buildOptions = {
 	banner: {
 		js: banner,
 	},
@@ -46,7 +46,10 @@ const context = await esbuild.context({
 	treeShaking: true,
 	outfile: "main.js",
 	minify: prod,
-});
+};
+
+// Create an esbuild context so we can use watch/rebuild in a version-compatible way
+const context = await esbuild.context(buildOptions);
 
 if (prod) {
 	await context.rebuild();
@@ -80,36 +83,61 @@ if (prod) {
 	}
 	process.exit(0);
 } else {
+	// Start watch using context.watch() (no options supported in this esbuild version)
 	await context.watch();
-	// Watch mode: copy files on rebuild
-	let firstBuild = true;
-	context.onEnd(async () => {
-		try {
-			if (fs.existsSync(pluginDir)) {
-				fs.copyFileSync('main.js', path.join(pluginDir, 'main.js'));
-				// Copy WASM files if they exist
-				if (fs.existsSync('pkg')) {
-					const pkgDir = path.join(pluginDir, 'pkg');
-					if (!fs.existsSync(pkgDir)) {
-						fs.mkdirSync(pkgDir, { recursive: true });
+
+	// Debounced file copy helper
+	let copyTimeout = null;
+	const scheduleCopy = () => {
+		if (copyTimeout) clearTimeout(copyTimeout);
+		copyTimeout = setTimeout(() => {
+			try {
+				if (fs.existsSync(pluginDir)) {
+					fs.copyFileSync('main.js', path.join(pluginDir, 'main.js'));
+					if (fs.existsSync('pkg')) {
+						const pkgDir = path.join(pluginDir, 'pkg');
+						if (!fs.existsSync(pkgDir)) {
+							fs.mkdirSync(pkgDir, { recursive: true });
+						}
+						const wasmFiles = fs.readdirSync('pkg');
+						wasmFiles.forEach(file => {
+							fs.copyFileSync(
+								path.join('pkg', file),
+								path.join(pkgDir, file)
+							);
+						});
 					}
-					const wasmFiles = fs.readdirSync('pkg');
-					wasmFiles.forEach(file => {
-						fs.copyFileSync(
-							path.join('pkg', file),
-							path.join(pkgDir, file)
-						);
-					});
-				}
-				if (firstBuild) {
 					console.log(`✓ Plugin copied to demo vault (watching for changes...)`);
-					firstBuild = false;
-				} else {
-					console.log(`✓ Plugin updated`);
 				}
+			} catch (err) {
+				// Silently ignore copy errors in watch mode
 			}
-		} catch (err) {
-			// Silently fail in watch mode
-		}
-	});
+		}, 200);
+	};
+
+	// Initial copy
+	scheduleCopy();
+
+	// Watch output files/directories for changes and trigger copy
+	try {
+		// Watch main.js
+		fs.watchFile('main.js', { interval: 200 }, (curr, prev) => {
+			if (curr.mtimeMs !== prev.mtimeMs) scheduleCopy();
+		});
+
+		// Watch pkg directory if it exists, fallback to polling for its creation
+		const watchPkg = () => {
+			if (fs.existsSync('pkg')) {
+				fs.watch('pkg', (eventType, filename) => {
+					scheduleCopy();
+				});
+			} else {
+				// Poll for directory creation
+				setTimeout(watchPkg, 500);
+			}
+		};
+		watchPkg();
+	} catch (err) {
+		// Ignore watch errors
+	}
 }
