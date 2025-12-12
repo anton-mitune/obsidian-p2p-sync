@@ -69,7 +69,7 @@ export class WasmBridge {
   /**
    * Create or get the P2P node
    */
-  createOrGetNode(deviceName: string, deviceId: string): P2PNodeInstance | null {
+  createOrGetNode(deviceName: string, deviceId: string, servicePort: number): P2PNodeInstance | null {
     if (!this.wasmModule) {
       console.error('WASM module not initialized');
       return null;
@@ -77,8 +77,8 @@ export class WasmBridge {
 
     if (!this.p2pNode) {
       try {
-        this.p2pNode = new this.wasmModule.P2PNode(deviceName, deviceId);
-        console.log('P2P node created:', deviceName, deviceId);
+        this.p2pNode = new this.wasmModule.P2PNode(deviceName, deviceId, servicePort);
+        console.log('P2P node created:', deviceName, deviceId, 'port:', servicePort);
       } catch (error) {
         console.error('Failed to create P2P node:', error);
         return null;

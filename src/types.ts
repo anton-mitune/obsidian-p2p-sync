@@ -8,7 +8,7 @@
 
 export interface WasmModule {
   // Discovery
-  P2PNode: new (deviceName: string, deviceId: string) => P2PNodeInstance;
+  P2PNode: new (deviceName: string, deviceId: string, servicePort: number) => P2PNodeInstance;
 
   // Utilities
   greet_from_rust(name: string): string;
@@ -24,8 +24,25 @@ export interface WasmModule {
   verify_pairing_code_format(code: string): boolean;
   verify_signature(publicKeyB64: string, message: Uint8Array, signatureB64: string): boolean;
 
+  // Transfer
+  TransferManager: new () => TransferManagerInstance;
+  encrypt_data(keyB64: string, plaintext: Uint8Array): EncryptedChunkInstance;
+  decrypt_data(keyB64: string, ciphertext: Uint8Array, nonce: Uint8Array): Uint8Array;
+
   // Allow additional properties
   [key: string]: unknown;
+}
+
+export interface TransferManagerInstance {
+  prepare_transfer(filePath: string, content: Uint8Array, sessionKey: string): string; // Returns JSON string of chunks
+  decrypt_chunk(chunkJson: string, sessionKey: string): Uint8Array;
+  free?(): void;
+}
+
+export interface EncryptedChunkInstance {
+  get_data(): Uint8Array;
+  get_nonce(): Uint8Array;
+  free?(): void;
 }
 
 export interface DeviceIdentityConstructor {
@@ -70,6 +87,13 @@ export interface P2PNodeInstance {
   get_announcement_json(): string;
   prune_peers(currentTime: BigInt, ttlMs: BigInt): number;
 
+  // File Sync
+  update_file(path: string, content: Uint8Array, mtime: BigInt): boolean;
+  mark_file_deleted(path: string, mtime: BigInt): boolean;
+  get_all_files(): string;
+  get_journal_state(): string;
+  load_journal_state(json: string): void;
+
   free?(): void;
 }
 
@@ -78,8 +102,24 @@ export interface DiscoveredPeerInstance {
   get_name(): string;
   get_device_id(): string;
   get_last_seen_timestamp(): number;
+  get_address(): string;
+  get_service_port(): number;
   free?(): void;
 }
+
+export type TransferDirection = 'incoming' | 'outgoing';
+
+export interface TransferStatus {
+    id: string; // Unique ID for the transfer (e.g., peerId + filePath)
+    filePath: string;
+    peerId: string;
+    direction: TransferDirection;
+    progress: number; // 0 to 1
+    totalSize?: number;
+    state: 'pending' | 'transferring' | 'completed' | 'failed';
+    error?: string;
+}
+
 
 // ============================================================================
 // Plugin Data Models
@@ -91,6 +131,7 @@ export interface DiscoveredPeerData {
   device_id: string;
   last_seen_timestamp: number;
   addresses: string[];
+  service_port?: number;
 }
 
 export interface P2PSyncSettings {
@@ -98,6 +139,7 @@ export interface P2PSyncSettings {
   deviceId: string; // Unique ID for this device
   deviceSecretKey?: string; // Base64 encoded secret key
   pairedDevices: string[]; // List of paired device IDs
+  pairedDeviceKeys: Record<string, string>; // deviceId -> publicKey
   enableLanDiscovery: boolean;
   discoveryTimeoutSeconds: number;
   enableEncryption: boolean;
@@ -165,5 +207,39 @@ export interface PairingResponseMessage {
     signature: string; // Signature of the request ID + initiator public key
     status: 'accepted' | 'rejected';
   };
+}
+
+export interface SessionOfferMessage {
+    type: 'SESSION_OFFER';
+    deviceId: string;
+    ephemeralPublicKey: string; // Base64
+    signature: string; // Base64, signed by identity key
+}
+
+export interface SessionAnswerMessage {
+    type: 'SESSION_ANSWER';
+    deviceId: string;
+    ephemeralPublicKey: string; // Base64
+    signature: string; // Base64, signed by identity key
+}
+
+export interface FileDeleteMessage {
+    type: 'FILE_DELETE';
+    filePath: string;
+}
+
+export interface SyncRequestMessage {
+    type: 'SYNC_REQUEST';
+    // We could send a vector clock or last sync timestamp here.
+    // For MVP, we just ask for everything.
+}
+
+export interface SyncResponseMessage {
+    type: 'SYNC_RESPONSE';
+    files: Array<{
+        path: string;
+        mtime: string; // BigInt serialized as string
+        isDeleted: boolean;
+    }>;
 }
 

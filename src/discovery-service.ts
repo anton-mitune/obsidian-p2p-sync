@@ -145,7 +145,8 @@ export class P2PDiscoveryService extends EventEmitter {
             name: data.device_name,
             device_id: data.device_id,
             last_seen_timestamp: Date.now(),
-            addresses: [senderIp]
+            addresses: [senderIp],
+            service_port: data.service_port
         };
 
         if (!this.peers.has(peer.id)) {

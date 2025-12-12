@@ -96,13 +96,6 @@
   - [ ] Show transfer errors with clear messages
   - [ ] Provide retry button for failed transfers
   - [ ] Log errors for debugging
-- [ ] **Testing**: Full vault sync tests
-  - [ ] Unit tests for file hashing and change detection
-  - [ ] Unit tests for chunking and resumable transfers
-  - [ ] Integration test: sync small vault (< 100 files)
-  - [ ] Integration test: sync large vault (1000+ files)
-  - [ ] Integration test: resume interrupted transfer
-  - [ ] Performance test: measure transfer speed for large files
 
 ---
 

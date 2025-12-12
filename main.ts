@@ -2,8 +2,9 @@ import { Plugin, Notice, PluginSettingTab, App, Setting, FileSystemAdapter } fro
 import { WasmBridge } from './src/wasm-bridge';
 import { P2PDiscoveryService } from './src/discovery-service';
 import { SecurityService } from './src/security-service';
+import { SyncService } from './src/sync-service';
 import { PairingModal } from './src/ui/pairing-modal';
-import { P2PSyncSettings } from './src/types';
+import { P2PSyncSettings, DiscoveredPeerData } from './src/types';
 import './src/ui/peer-list-view.css';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -24,6 +25,7 @@ const DEFAULT_SETTINGS: P2PSyncSettings = {
   deviceName: 'My Device',
   deviceId: '', // Will be generated on first load
   pairedDevices: [],
+  pairedDeviceKeys: {},
   enableLanDiscovery: true,
   discoveryTimeoutSeconds: 30,
   enableEncryption: true,
@@ -32,12 +34,18 @@ const DEFAULT_SETTINGS: P2PSyncSettings = {
   logLevel: 'info',
 };
 
+import { SyncView, SYNC_VIEW_TYPE } from './src/ui/sync-view';
+import { TcpTransport } from './src/transport/tcp-transport';
+
 export default class P2PVaultSyncPlugin extends Plugin {
-  private wasmBridge: WasmBridge | null = null;
+  public wasmBridge: WasmBridge | null = null;
   public discoveryService: P2PDiscoveryService | null = null;
   public securityService: SecurityService | null = null;
+  public syncService: SyncService | null = null;
+  public tcpTransport: TcpTransport | null = null;
   private settings: P2PSyncSettings = { ...DEFAULT_SETTINGS };
   public settingTab: P2PSyncSettingTab | null = null;
+  private journalSaveInterval: number | null = null;
 
   async onload() {
     console.log('Loading P2P Vault Sync plugin...');
@@ -89,6 +97,7 @@ export default class P2PVaultSyncPlugin extends Plugin {
 
             // Initialize Security Service
             this.securityService = new SecurityService(this.wasmBridge, this.settings.deviceId);
+            this.securityService.setPairedDevices(this.settings.pairedDevices, this.settings.pairedDeviceKeys || {});
             const secretKey = await this.securityService.initialize(this.settings.deviceSecretKey);
 
             if (secretKey !== this.settings.deviceSecretKey) {
@@ -96,9 +105,64 @@ export default class P2PVaultSyncPlugin extends Plugin {
                 await this.saveSettings();
             }
 
+            // Initialize TCP Transport
+            this.tcpTransport = new TcpTransport();
+            const servicePort = await this.tcpTransport.initialize();
+
             // Create P2P node
-            const p2pNode = this.wasmBridge.createOrGetNode(this.settings.deviceName, this.settings.deviceId);
+            const p2pNode = this.wasmBridge.createOrGetNode(this.settings.deviceName, this.settings.deviceId, servicePort);
+
+            // Set identity on transport
             if (p2pNode) {
+                this.tcpTransport.setIdentity(p2pNode.get_peer_id());
+            }
+
+            // Listen for new connections to trigger sync
+            this.tcpTransport.on('connected', (peerId: string) => {
+                console.log(`TCP Connected to ${peerId}, initiating secure session...`);
+
+                // Show notice
+                const peer = this.discoveryService?.getPeer(peerId);
+                if (peer) {
+                    new Notice(`Connected to ${peer.name}`);
+                }
+
+                if (this.syncService) {
+                    // Don't sync yet! Just start the handshake.
+                    // The sync will be triggered by the 'SESSION_ANSWER' handler in SyncService.
+                    this.syncService.initiateSession(peerId);
+                }
+            });
+
+            if (p2pNode) {
+                // Load journal state
+                await this.loadJournal(p2pNode);
+
+                // Initialize Sync Service
+                this.syncService = new SyncService(this.app, this.wasmBridge, this.tcpTransport, this.securityService);
+                this.syncService.startWatching();
+
+                // Auto-reconnect on activity
+                this.syncService.on('activity', () => {
+                    // Check if we have paired peers that are discovered but not connected
+                    const peers = this.discoveryService?.getPeers() || [];
+                    for (const peer of peers) {
+                        if (this.settings.pairedDevices.includes(peer.device_id)) {
+                            if (!this.tcpTransport?.isConnected(peer.id)) {
+                                if (peer.service_port && peer.service_port > 0 && peer.addresses.length > 0) {
+                                    console.log(`Auto-reconnecting to ${peer.name} due to activity...`);
+                                    this.tcpTransport?.connectToPeer(peer.id, peer.addresses[0], peer.service_port);
+                                }
+                            }
+                        }
+                    }
+                });
+
+                // Auto-save journal every 5 minutes
+                this.journalSaveInterval = window.setInterval(() => {
+                    this.saveJournal();
+                }, 5 * 60 * 1000);
+
                 // Initialize discovery service
                 this.discoveryService = new P2PDiscoveryService({
                     deviceName: this.settings.deviceName,
@@ -106,6 +170,37 @@ export default class P2PVaultSyncPlugin extends Plugin {
                 });
 
                 this.discoveryService.initialize(p2pNode);
+
+                // Connect to discovered peers
+                this.discoveryService.on('peer_discovered', (peer: DiscoveredPeerData) => {
+                    if (this.settings.pairedDevices.includes(peer.device_id)) {
+                        if (peer.service_port && peer.service_port > 0 && peer.addresses.length > 0) {
+                            console.log(`Connecting to paired peer: ${peer.name} (${peer.addresses[0]}:${peer.service_port})`);
+                            new Notice(`Peer ${peer.name} is online. Connecting...`);
+                            this.tcpTransport?.connectToPeer(peer.id, peer.addresses[0], peer.service_port);
+                        }
+                    } else {
+                        console.log(`Discovered unpaired peer: ${peer.name}`);
+                    }
+                });
+
+                this.discoveryService.on('peer_lost', (peer: DiscoveredPeerData) => {
+                    if (this.settings.pairedDevices.includes(peer.device_id)) {
+                        new Notice(`Peer ${peer.name} went offline.`);
+                    }
+                });
+
+                // Start discovery if enabled
+                if (this.settings.enableLanDiscovery) {
+                    this.startDiscovery();
+                }
+
+                // Onboarding Notices
+                if (this.settings.pairedDevices.length === 0) {
+                    new Notice("P2P Sync enabled. Go to settings to pair devices.", 10000);
+                } else {
+                    new Notice("Searching for paired peers...", 5000);
+                }
 
                 // Share transport with Security Service
                 // We need to access the transport from discovery service or create a shared one
@@ -126,12 +221,16 @@ export default class P2PVaultSyncPlugin extends Plugin {
                     this.securityService.setTransport(transport);
 
                     // Listen for pairing success
-                    this.securityService.on('pairing_success', async (data: { deviceId: string, name: string }) => {
+                    this.securityService.on('pairing_success', async (data: { deviceId: string, name: string, publicKey: string }) => {
                         new Notice(`Successfully paired with ${data.name}!`);
                         const paired = this.settings.pairedDevices || [];
                         if (!paired.includes(data.deviceId)) {
                             this.settings.pairedDevices = [...paired, data.deviceId];
+                            this.settings.pairedDeviceKeys = this.settings.pairedDeviceKeys || {};
+                            this.settings.pairedDeviceKeys[data.deviceId] = data.publicKey;
+
                             await this.saveSettings();
+                            this.securityService?.setPairedDevices(this.settings.pairedDevices, this.settings.pairedDeviceKeys);
 
                             // Refresh UI if open
                             // We can emit an event or call a method on the setting tab if we had reference
@@ -141,20 +240,47 @@ export default class P2PVaultSyncPlugin extends Plugin {
                             if (settingTab && settingTab.renderPeerList) {
                                 settingTab.renderPeerList();
                             }
+
+                            // Trigger connection to the newly paired peer
+                            const peer = this.discoveryService?.getPeers().find(p => p.device_id === data.deviceId);
+                            if (peer && peer.service_port && peer.addresses.length > 0) {
+                                console.log(`Connecting to newly paired peer: ${peer.name}`);
+                                new Notice(`Connecting to ${peer.name}...`);
+
+                                if (this.tcpTransport?.isConnected(peer.id)) {
+                                    console.log(`Already connected to ${peer.name}, initiating session...`);
+                                    this.syncService?.initiateSession(peer.id);
+                                } else {
+                                    this.tcpTransport?.connectToPeer(peer.id, peer.addresses[0], peer.service_port);
+                                }
+                            }
                         }
                     });
                 }
-
-                console.log('Discovery service initialized');
-                console.log('P2P Node status:', p2pNode.status());
             }
+        } else {
+            console.error('Failed to initialize WASM module');
         }
     } catch (error) {
         console.error('Failed to initialize WASM:', error);
         new Notice('Failed to initialize P2P Sync engine');
     }
 
+    // Register View
+    this.registerView(
+      SYNC_VIEW_TYPE,
+      (leaf) => new SyncView(leaf, this)
+    );
+
     // Add commands
+    this.addCommand({
+      id: 'open-sync-view',
+      name: 'Open Sync Status',
+      callback: () => {
+        this.activateView();
+      },
+    });
+
     this.addCommand({
       id: 'pair-device',
       name: 'Pair with Device',
@@ -267,6 +393,11 @@ export default class P2PVaultSyncPlugin extends Plugin {
   async onunload() {
     console.log('Unloading P2P Vault Sync plugin...');
 
+    if (this.journalSaveInterval) {
+        clearInterval(this.journalSaveInterval);
+    }
+    await this.saveJournal();
+
     // Stop discovery
     if (this.discoveryService) {
       this.discoveryService.cleanup();
@@ -275,6 +406,55 @@ export default class P2PVaultSyncPlugin extends Plugin {
     // Cleanup WASM
     if (this.wasmBridge) {
       this.wasmBridge.cleanup();
+    }
+  }
+
+  async loadJournal(node: any) {
+      try {
+          const adapter = this.app.vault.adapter;
+          const journalPath = path.join(this.manifest.dir || '.', 'journal.json');
+
+          if (await adapter.exists(journalPath)) {
+              const json = await adapter.read(journalPath);
+              node.load_journal_state(json);
+              console.log('Loaded change journal from disk');
+          }
+      } catch (e) {
+          console.error('Failed to load journal:', e);
+      }
+  }
+
+  async saveJournal() {
+      const node = this.wasmBridge?.getNode();
+      if (!node) return;
+
+      try {
+          const json = node.get_journal_state();
+          const adapter = this.app.vault.adapter;
+          const journalPath = path.join(this.manifest.dir || '.', 'journal.json');
+
+          await adapter.write(journalPath, json);
+          console.log('Saved change journal to disk');
+      } catch (e) {
+          console.error('Failed to save journal:', e);
+      }
+  }
+
+  async activateView() {
+    const { workspace } = this.app;
+
+    let leaf = workspace.getLeavesOfType(SYNC_VIEW_TYPE)[0];
+
+    if (!leaf) {
+      const rightLeaf = workspace.getRightLeaf(false);
+      if (rightLeaf) {
+          leaf = rightLeaf;
+          await leaf.setViewState({ type: SYNC_VIEW_TYPE, active: true });
+      }
+    }
+
+    if (leaf) {
+        workspace.revealLeaf(leaf);
     }
   }
 }
@@ -462,8 +642,9 @@ class P2PSyncSettingTab extends PluginSettingTab {
         this.plugin.discoveryService.removeListener('peer_updated', this.onPeerUpdate);
         this.plugin.discoveryService.removeListener('peer_lost', this.onPeerUpdate);
 
-        // Stop discovery when leaving settings to save resources
-        this.plugin.stopDiscovery();
+        // Do NOT stop discovery when leaving settings.
+        // We want discovery to run in background if enabled.
+        // this.plugin.stopDiscovery();
     }
   }
 

@@ -9,6 +9,10 @@ use x25519_dalek::{StaticSecret, PublicKey as XPublicKey};
 use rand_core::{OsRng, RngCore};
 use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
 use std::convert::TryInto;
+use aes_gcm::{
+    aead::{Aead, KeyInit, Payload},
+    Aes256Gcm, Nonce // Or XChaCha20Poly1305 if preferred, but AES-GCM is in Cargo.toml
+};
 
 // Helper to encode/decode base64
 fn to_base64(data: &[u8]) -> String {
@@ -181,5 +185,62 @@ pub fn generate_fingerprint(public_key_b64: &str) -> String {
 #[wasm_bindgen]
 pub fn verify_pairing_code_format(code: &str) -> bool {
     code.len() == 6 && code.chars().all(|c| c.is_numeric())
+}
+
+// ============================================================================
+// Symmetric Encryption (AES-GCM)
+// ============================================================================
+
+#[wasm_bindgen]
+pub struct EncryptedChunk {
+    data: Vec<u8>,
+    nonce: Vec<u8>,
+}
+
+#[wasm_bindgen]
+impl EncryptedChunk {
+    pub fn get_data(&self) -> Vec<u8> {
+        self.data.clone()
+    }
+
+    pub fn get_nonce(&self) -> Vec<u8> {
+        self.nonce.clone()
+    }
+}
+
+/// Encrypt data using AES-256-GCM
+/// Key must be 32 bytes (base64 encoded)
+#[wasm_bindgen]
+pub fn encrypt_data(key_b64: String, plaintext: &[u8]) -> Result<EncryptedChunk, String> {
+    let key_bytes = from_base64(&key_b64)?;
+    let key = aes_gcm::Key::<Aes256Gcm>::from_slice(&key_bytes);
+    let cipher = Aes256Gcm::new(key);
+
+    let mut nonce_bytes = [0u8; 12]; // 96-bit nonce
+    OsRng.fill_bytes(&mut nonce_bytes);
+    let nonce = Nonce::from_slice(&nonce_bytes);
+
+    let ciphertext = cipher.encrypt(nonce, plaintext)
+        .map_err(|e| format!("Encryption failed: {}", e))?;
+
+    Ok(EncryptedChunk {
+        data: ciphertext,
+        nonce: nonce_bytes.to_vec(),
+    })
+}
+
+/// Decrypt data using AES-256-GCM
+#[wasm_bindgen]
+pub fn decrypt_data(key_b64: String, ciphertext: &[u8], nonce_bytes: &[u8]) -> Result<Vec<u8>, String> {
+    let key_bytes = from_base64(&key_b64)?;
+    let key = aes_gcm::Key::<Aes256Gcm>::from_slice(&key_bytes);
+    let cipher = Aes256Gcm::new(key);
+
+    let nonce = Nonce::from_slice(nonce_bytes);
+
+    let plaintext = cipher.decrypt(nonce, ciphertext)
+        .map_err(|e| format!("Decryption failed: {}", e))?;
+
+    Ok(plaintext)
 }
 

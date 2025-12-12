@@ -11,11 +11,31 @@ export class SecurityService extends EventEmitter {
     private transport: UdpTransport | null = null;
     private pendingRequests: Map<string, { resolve: Function, reject: Function }> = new Map();
     private activePairingCode: string | null = null;
+    private sessionKeys: Map<string, string> = new Map(); // peerId -> sessionKey (base64)
+    private pairedDevices: Set<string> = new Set();
+    private pairedDeviceKeys: Map<string, string> = new Map();
 
     constructor(wasmBridge: WasmBridge, deviceId: string) {
         super();
         this.wasmBridge = wasmBridge;
         this.deviceId = deviceId;
+    }
+
+    getDeviceId(): string {
+        return this.deviceId;
+    }
+
+    setPairedDevices(deviceIds: string[], keys: Record<string, string>) {
+        this.pairedDevices = new Set(deviceIds);
+        this.pairedDeviceKeys = new Map(Object.entries(keys));
+    }
+
+    isDevicePaired(deviceId: string): boolean {
+        return this.pairedDevices.has(deviceId);
+    }
+
+    getPeerPublicKey(deviceId: string): string | undefined {
+        return this.pairedDeviceKeys.get(deviceId);
     }
 
     setTransport(transport: UdpTransport) {
@@ -92,6 +112,122 @@ export class SecurityService extends EventEmitter {
         const wasm = this.wasmBridge.getModule();
         if (!wasm) return false;
         return wasm.verify_pairing_code_format(code);
+    }
+
+    getSessionKey(peerId: string): string | undefined {
+        return this.sessionKeys.get(peerId);
+    }
+
+    // --- Session Handshake Logic ---
+
+    // 1. Initiator generates ephemeral key and creates offer
+    async createSessionOffer(peerId: string): Promise<{ offer: any, keyExchange: any }> {
+        const wasm = this.wasmBridge.getModule();
+        if (!wasm || !this.identity) throw new Error("Not initialized");
+
+        const keyExchange = new wasm.KeyExchange();
+        const ephemeralPublicKey = keyExchange.get_public_key();
+
+        // Sign the ephemeral public key with our identity key to prove authenticity
+        const signature = this.identity.sign(new TextEncoder().encode(ephemeralPublicKey));
+
+        const offer = {
+            type: 'SESSION_OFFER',
+            deviceId: this.deviceId,
+            ephemeralPublicKey,
+            signature
+        };
+
+        return { offer, keyExchange };
+    }
+
+    // 2. Responder processes offer
+    async handleSessionOffer(
+        peerId: string,
+        offerMsg: any
+    ): Promise<any> {
+        const wasm = this.wasmBridge.getModule();
+        if (!wasm || !this.identity) throw new Error("Not initialized");
+
+        const peerDeviceId = offerMsg.deviceId;
+        const peerIdentityPublicKey = this.getPeerPublicKey(peerDeviceId);
+
+        if (!peerIdentityPublicKey) {
+            throw new Error(`Unknown peer device: ${peerDeviceId}`);
+        }
+
+        const offerEphemeralPublicKey = offerMsg.ephemeralPublicKey;
+        const offerSignature = offerMsg.signature;
+
+        // Verify signature
+        const isValid = wasm.verify_signature(
+            peerIdentityPublicKey,
+            new TextEncoder().encode(offerEphemeralPublicKey),
+            offerSignature
+        );
+
+        if (!isValid) {
+            throw new Error("Invalid session signature");
+        }
+
+        // Generate our ephemeral key
+        const keyExchange = new wasm.KeyExchange();
+        const answerEphemeralPublicKey = keyExchange.get_public_key();
+
+        // Sign our ephemeral key
+        const answerSignature = this.identity.sign(new TextEncoder().encode(answerEphemeralPublicKey));
+
+        // Compute shared secret
+        const sharedSecret = keyExchange.compute_shared_secret(offerEphemeralPublicKey);
+
+        // Store session key
+        this.sessionKeys.set(peerId, sharedSecret);
+
+        return {
+            type: 'SESSION_ANSWER',
+            deviceId: this.deviceId,
+            ephemeralPublicKey: answerEphemeralPublicKey,
+            signature: answerSignature
+        };
+    }
+
+    // 3. Initiator processes answer
+    async handleSessionAnswer(
+        peerId: string,
+        answerMsg: any,
+        keyExchange: any
+    ): Promise<string> {
+        const wasm = this.wasmBridge.getModule();
+        if (!wasm) throw new Error("Not initialized");
+
+        const peerDeviceId = answerMsg.deviceId;
+        const peerIdentityPublicKey = this.getPeerPublicKey(peerDeviceId);
+
+        if (!peerIdentityPublicKey) {
+             throw new Error(`Unknown peer device: ${peerDeviceId}`);
+        }
+
+        const answerEphemeralPublicKey = answerMsg.ephemeralPublicKey;
+        const answerSignature = answerMsg.signature;
+
+        // Verify signature
+        const isValid = wasm.verify_signature(
+            peerIdentityPublicKey,
+            new TextEncoder().encode(answerEphemeralPublicKey),
+            answerSignature
+        );
+
+        if (!isValid) {
+            throw new Error("Invalid session answer signature");
+        }
+
+        // Compute shared secret
+        const sharedSecret = keyExchange.compute_shared_secret(answerEphemeralPublicKey);
+
+        // Store session key
+        this.sessionKeys.set(peerId, sharedSecret);
+
+        return sharedSecret;
     }
 
     // --- Handshake Logic ---
@@ -172,7 +308,8 @@ export class SecurityService extends EventEmitter {
         // Emit success event so UI can update
         this.emit('pairing_success', {
             deviceId: msg.payload.initiatorDeviceId,
-            name: msg.payload.initiatorName
+            name: msg.payload.initiatorName,
+            publicKey: msg.payload.initiatorPublicKey
         });
     }
 
@@ -197,7 +334,8 @@ export class SecurityService extends EventEmitter {
                          pending.resolve(true);
                          this.emit('pairing_success', {
                              deviceId: msg.payload.responderDeviceId,
-                             name: msg.payload.responderName
+                             name: msg.payload.responderName,
+                             publicKey: msg.payload.responderPublicKey
                          });
                      } else {
                          pending.reject(new Error("Invalid signature from peer"));

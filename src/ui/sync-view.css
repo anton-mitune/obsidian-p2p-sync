@@ -1,0 +1,110 @@
+.p2p-sync-status {
+    padding: 10px;
+}
+
+.status-header {
+    font-size: 1.2em;
+    margin-bottom: 20px;
+}
+
+.status-text {
+    font-weight: bold;
+    color: var(--text-accent);
+}
+
+.peers-list {
+    list-style: none;
+    padding: 0;
+    margin-bottom: 20px;
+}
+
+.peers-list li {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 8px;
+    background-color: var(--background-secondary);
+    border-radius: 4px;
+    margin-bottom: 5px;
+}
+
+.status-dot {
+    font-size: 1.2em;
+}
+
+.status-dot.online {
+    color: var(--color-green);
+}
+
+.transfers-list {
+    background-color: var(--background-secondary);
+    padding: 10px;
+    border-radius: 4px;
+    min-height: 50px;
+    margin-bottom: 20px;
+}
+
+.empty-state {
+    color: var(--text-muted);
+    font-style: italic;
+    text-align: center;
+}
+
+.transfer-item {
+    background-color: var(--background-primary);
+    padding: 8px;
+    border-radius: 4px;
+    margin-bottom: 8px;
+    border: 1px solid var(--background-modifier-border);
+}
+
+.transfer-header {
+    display: flex;
+    justify-content: space-between;
+    margin-bottom: 4px;
+    font-size: 0.9em;
+}
+
+.transfer-file {
+    font-weight: bold;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    max-width: 80%;
+}
+
+.transfer-direction {
+    font-weight: bold;
+}
+
+.transfer-direction.incoming {
+    color: var(--color-blue);
+}
+
+.transfer-direction.outgoing {
+    color: var(--color-green);
+}
+
+.transfer-progress-bar {
+    height: 4px;
+    background-color: var(--background-modifier-border);
+    border-radius: 2px;
+    overflow: hidden;
+    margin-bottom: 4px;
+}
+
+.transfer-progress-fill {
+    height: 100%;
+    background-color: var(--interactive-accent);
+    transition: width 0.2s ease;
+}
+
+.transfer-status {
+    font-size: 0.8em;
+    color: var(--text-muted);
+    text-align: right;
+}
+
+.error-text {
+    color: var(--color-red);
+}
